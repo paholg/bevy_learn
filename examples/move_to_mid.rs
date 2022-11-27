@@ -2,7 +2,6 @@
 //! a 1d grid.
 
 use bevy::{
-    ecs::system::BoxedSystem,
     prelude::{
         default, shape, App, Assets, Camera2dBundle, Color, Commands, Component, Mesh, NonSendMut,
         Query, ResMut, System, Transform, Vec2, Vec3, With,
@@ -22,21 +21,20 @@ struct Ai;
 fn main() {
     // Ai
     let env = MoveEnv::new();
-    // let trainer = ReinforceTrainer::new(env);
-    // let system: BoxedSystem = Box::new(train_one_step);
+    let trainer = ReinforceTrainer::new(env);
     App::new()
         .add_plugins(DefaultPlugins)
         .add_startup_system(setup)
-        // .insert_non_send_resource(trainer)
+        .insert_non_send_resource(trainer)
         .add_system(train_one_step)
         .run();
 }
 
-fn train_one_step<'w, 's, 'a>(
-    // mut trainer: NonSendMut<ReinforceTrainer<MoveEnv>>,
-    query: Query<'w, 's, &'a mut Transform, With<Ai>>,
+fn train_one_step<'w, 's>(
+    mut trainer: NonSendMut<ReinforceTrainer<MoveEnv>>,
+    query: Query<'w, 's, &'static mut Transform, With<Ai>>,
 ) {
-    // trainer.train_one_step(query)
+    trainer.train_one_step(query)
 }
 
 fn setup(
@@ -83,7 +81,7 @@ impl MoveEnv {
 const ACTIONS: [Vec2; 2] = [Vec2::new(-1.0, 0.0), Vec2::new(1.0, 0.0)];
 
 impl Env for MoveEnv {
-    type Param<'w, 's, 'a> = Query<'w, 's, &'a mut Transform, With<Ai>>;
+    type Param<'w, 's> = Query<'w, 's, &'static mut Transform, With<Ai>>;
 
     const NUM_ACTIONS: i64 = ACTIONS.len() as i64;
 
@@ -97,11 +95,7 @@ impl Env for MoveEnv {
         vec![START_X]
     }
 
-    fn step<'w, 's, 'a>(
-        &mut self,
-        action: i64,
-        mut param: Self::Param<'w, 's, 'a>,
-    ) -> bevy_learn::Step {
+    fn step<'w, 's>(&mut self, action: i64, mut param: Self::Param<'w, 's>) -> bevy_learn::Step {
         let mut transform = param.single_mut();
         let action = ACTIONS[action as usize];
         transform.translation += action.extend(0.0);

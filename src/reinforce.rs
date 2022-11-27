@@ -90,10 +90,11 @@ impl<E: Env> ReinforceTrainer<E> {
 }
 
 impl<E: Env> Trainer for ReinforceTrainer<E> {
-    type Param<'w, 's, 'a> = E::Param<'w, 's, 'a>;
+    type Param<'w, 's> = E::Param<'w, 's>;
 
-    fn train_one_step<'w, 's, 'a>(&mut self, param: Self::Param<'w, 's, 'a>) {
+    fn train_one_step<'w, 's>(&mut self, param: Self::Param<'w, 's>) {
         // Calculate the probabilities of taking each action.
+        info!(?self.state, "STATE");
         let probs = self
             .policy_net
             .forward(&Tensor::of_slice(&self.state))
