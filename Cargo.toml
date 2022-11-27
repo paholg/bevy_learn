@@ -24,3 +24,6 @@ opt-level = 3
 
 [[example]]
 name = "cartpole"
+
+[[example]]
+name = "move_to_mid"

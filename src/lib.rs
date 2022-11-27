@@ -16,7 +16,7 @@ pub struct Step {
 }
 
 pub trait Env {
-    type Param: SystemParam;
+    type Param<'w, 's, 'a>;
 
     const NUM_ACTIONS: i64;
 
@@ -31,15 +31,15 @@ pub trait Env {
     // /// Reset the environment, returning the observation of the world state.
     // fn reset(&mut self, param: impl SystemParam) -> Obs;
 
-    fn step(&mut self, action: i64, param: Self::Param) -> Step;
+    fn step<'w, 's, 'a>(&mut self, action: i64, param: Self::Param<'w, 's, 'a>) -> Step;
 }
 
 pub trait Trainer {
-    type Param: SystemParam;
-    fn train_one_step(&mut self, param: Self::Param);
+    type Param<'w, 's, 'a>;
+    fn train_one_step<'w, 's, 'a>(&mut self, param: Self::Param<'w, 's, 'a>);
 }
 
-pub trait Sampler {
-    type Param: SystemParam;
-    fn sample_one_step(&mut self, param: Self::Param);
-}
+// pub trait Sampler {
+//     type Param<'w, 's>;
+//     fn sample_one_step<'w, 's>(&mut self, param: Self::Param<'w, 's>);
+// }

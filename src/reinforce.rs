@@ -90,9 +90,9 @@ impl<E: Env> ReinforceTrainer<E> {
 }
 
 impl<E: Env> Trainer for ReinforceTrainer<E> {
-    type Param = E::Param;
+    type Param<'w, 's, 'a> = E::Param<'w, 's, 'a>;
 
-    fn train_one_step(&mut self, param: Self::Param) {
+    fn train_one_step<'w, 's, 'a>(&mut self, param: Self::Param<'w, 's, 'a>) {
         // Calculate the probabilities of taking each action.
         let probs = self
             .policy_net
