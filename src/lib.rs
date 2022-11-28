@@ -1,4 +1,3 @@
-use bevy::ecs::system::SystemParam;
 use tch::nn;
 
 pub mod reinforce;
@@ -28,10 +27,10 @@ pub trait Env {
     /// Return the initial observation of the world state.
     fn init(&self) -> Obs;
 
-    // /// Reset the environment, returning the observation of the world state.
-    // fn reset(&mut self, param: impl SystemParam) -> Obs;
+    /// Reset the environment, returning the observation of the world state.
+    fn reset<'w, 's>(&mut self, param: &mut Self::Param<'w, 's>) -> Obs;
 
-    fn step<'w, 's>(&mut self, action: i64, param: Self::Param<'w, 's>) -> Step;
+    fn step<'w, 's>(&mut self, action: i64, param: &mut Self::Param<'w, 's>) -> Step;
 }
 
 pub trait Trainer {

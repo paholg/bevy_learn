@@ -28,7 +28,7 @@ impl PolicyNet {
             nn::LinearConfig::default(),
         );
         let out = nn::linear(
-            env.path() / "reinfoce-lout",
+            env.path() / "reinforce-lout",
             n_hidden,
             E::NUM_ACTIONS,
             nn::LinearConfig::default(),
@@ -92,23 +92,28 @@ impl<E: Env> ReinforceTrainer<E> {
 impl<E: Env> Trainer for ReinforceTrainer<E> {
     type Param<'w, 's> = E::Param<'w, 's>;
 
-    fn train_one_step<'w, 's>(&mut self, param: Self::Param<'w, 's>) {
+    fn train_one_step<'w, 's>(&mut self, mut param: Self::Param<'w, 's>) {
         // Calculate the probabilities of taking each action.
-        info!(?self.state, "STATE");
-        let probs = self
-            .policy_net
-            .forward(&Tensor::of_slice(&self.state))
-            .unsqueeze(0);
-        let action = probs.multinomial(1, true).into();
+        let state = Tensor::of_slice(&self.state).unsqueeze(0);
+        let probs = self.policy_net.forward(&state);
+        let sampler = Categorical::from_probs(probs);
+        let action = sampler.sample(&[]).into();
 
-        let step = self.env.step(action, param);
-        self.states.push(step.obs);
+        let step = self.env.step(action, &mut param);
+        self.states.push(self.state.clone());
         self.actions.push(action);
         self.rewards.push(step.reward);
+        self.state = step.obs;
+
+        // info!(step.reward, ?probs_vec, ?self.state, action, "Step");
 
         if step.is_done {
-            // TODO: calculate rewards betterer
-            let reward: f32 = self.rewards.iter().sum();
+            let reward: f32 = self
+                .rewards
+                .iter()
+                .enumerate()
+                .map(|(i, r)| self.gamma.powi(i as i32) * r)
+                .sum();
             let states = Tensor::of_slice2(&self.states);
             let actions = Tensor::of_slice(&self.actions);
             let probs = self.policy_net.forward(&states);
@@ -123,9 +128,14 @@ impl<E: Env> Trainer for ReinforceTrainer<E> {
 
             let sum_rewards = self.rewards.iter().sum();
             self.returns.push_back(sum_rewards);
-            let avg_return = self.returns.iter().sum::<f32>() / self.returns.len() as f32;
-            info!(%self.n_episodes, %avg_return, "Episode complete.");
             self.n_episodes += 1;
+
+            self.rewards = Vec::new();
+            self.actions = Vec::new();
+            self.states = Vec::new();
+            self.state = self.env.reset(&mut param);
+
+            println!("Reward: {reward:7.2}, episodes: {}", self.n_episodes);
         }
     }
 }
