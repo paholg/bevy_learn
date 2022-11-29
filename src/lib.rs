@@ -1,11 +1,16 @@
+use std::marker::PhantomData;
+
+use bevy::prelude::{NonSendMut, Plugin};
 use tch::nn;
 
+pub mod ppo;
 pub mod reinforce;
 
 /// The type used for the observation of the state of the world.
 /// It is currently a 1-d vector, but will be a Tensor in the future.
 pub type Obs = Vec<f32>;
 
+#[derive(Debug, Clone)]
 pub struct Step {
     /// Observation: The state of the world as exposed to the AI.
     pub obs: Obs,
@@ -33,12 +38,19 @@ pub trait Env {
     fn step<'w, 's>(&mut self, action: i64, param: &mut Self::Param<'w, 's>) -> Step;
 }
 
-pub trait Trainer {
-    type Param<'w, 's>;
-    fn train_one_step<'w, 's>(&mut self, param: Self::Param<'w, 's>);
+pub trait Trainer<E: Env> {
+    fn train_one_step<'w, 's>(&mut self, param: E::Param<'w, 's>);
 }
 
-// pub trait Sampler {
-//     type Param<'w, 's>;
-//     fn sample_one_step<'w, 's>(&mut self, param: Self::Param<'w, 's>);
-// }
+pub fn train_one_step<'w, 's, T: Trainer<E>, E: Env>(
+    mut trainer: NonSendMut<T>,
+    param: E::Param<'w, 's>,
+) {
+    trainer.train_one_step(param)
+}
+
+pub trait Sampler {
+    type Param<'w, 's>;
+
+    fn sample_one_step<'w, 's>(&mut self, param: Self::Param<'w, 's>);
+}

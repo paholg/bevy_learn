@@ -11,13 +11,13 @@ use bevy::{
     window::{PresentMode, WindowDescriptor, WindowPlugin},
     DefaultPlugins, MinimalPlugins,
 };
-use bevy_learn::{reinforce::ReinforceTrainer, Env, Trainer};
+use bevy_learn::{reinforce::ReinforceTrainer, train_one_step, Env, Trainer};
 use tch::nn;
 use tracing::info;
 
-const GRID_SIZE: f32 = 500.0;
-const START_X: f32 = -GRID_SIZE * 0.25;
-const START_Y: f32 = -GRID_SIZE * 0.25 * 0.0;
+const GRID_SIZE: f32 = 10.0;
+const START_X: f32 = 0.0;
+const START_Y: f32 = 0.0;
 
 #[derive(Component)]
 struct Ai;
@@ -41,17 +41,8 @@ fn main() {
         // }))
         .add_startup_system(setup)
         .insert_non_send_resource(trainer)
-        .add_system(train_one_step)
-        // .add_plugin(bevy::diagnostic::LogDiagnosticsPlugin::default())
-        // .add_plugin(bevy::diagnostic::FrameTimeDiagnosticsPlugin::default())
+        .add_system(train_one_step::<ReinforceTrainer<MoveEnv>, MoveEnv>)
         .run();
-}
-
-fn train_one_step<'w, 's>(
-    mut trainer: NonSendMut<ReinforceTrainer<MoveEnv>>,
-    query: Query<'w, 's, &'static mut Transform, With<Ai>>,
-) {
-    trainer.train_one_step(query)
 }
 
 fn setup(
@@ -59,7 +50,7 @@ fn setup(
     // mut meshes: ResMut<Assets<Mesh>>,
     // mut materials: ResMut<Assets<ColorMaterial>>,
 ) {
-    commands.spawn(Camera2dBundle::default());
+    // commands.spawn(Camera2dBundle::default());
 
     // // Grid
     // commands.spawn(SpriteBundle {
@@ -104,8 +95,8 @@ impl MoveEnv {
     }
 }
 
-const ACTIONS: [Vec2; 3] = [
-    Vec2::new(0.0, 0.0),
+const ACTIONS: [Vec2; 2] = [
+    // Vec2::new(0.0, 0.0),
     Vec2::new(-1.0, 0.0),
     Vec2::new(1.0, 0.0),
     // Vec2::new(0.0, 1.0),
@@ -117,14 +108,14 @@ impl Env for MoveEnv {
 
     const NUM_ACTIONS: i64 = ACTIONS.len() as i64;
 
-    const NUM_OBSERVATIONS: i64 = 2;
+    const NUM_OBSERVATIONS: i64 = 1;
 
     fn path(&self) -> tch::nn::Path {
         self.vs.root()
     }
 
     fn init(&self) -> bevy_learn::Obs {
-        vec![START_X, START_Y]
+        vec![START_X]
     }
 
     fn step<'w, 's>(&mut self, action: i64, param: &mut Self::Param<'w, 's>) -> bevy_learn::Step {
@@ -132,15 +123,18 @@ impl Env for MoveEnv {
         let action = ACTIONS[action as usize];
         transform.translation += action.extend(0.0);
 
-        let reward = (0.5 - transform.translation.x.abs() / GRID_SIZE / 0.5) * 2.0;
-        let is_done = transform.translation.x.abs() < f32::EPSILON
-            || transform.translation.x.abs() > GRID_SIZE * 0.5;
+        // let reward = transform.translation.x / GRID_SIZE / 0.5;
+        let is_done = transform.translation.x.abs() > GRID_SIZE * 0.5;
+        let reward = if transform.translation.x > GRID_SIZE * 0.5 {
+            1.0
+        } else if transform.translation.x < -GRID_SIZE * 0.5 {
+            -1.0
+        } else {
+            0.0
+        };
 
         bevy_learn::Step {
-            obs: vec![
-                transform.translation.x / (GRID_SIZE * 0.5),
-                transform.translation.y / (GRID_SIZE * 0.5),
-            ],
+            obs: vec![transform.translation.x / (GRID_SIZE * 0.5)],
             reward,
             is_done,
         }
@@ -151,9 +145,6 @@ impl Env for MoveEnv {
         transform.translation.x = START_X;
         transform.translation.y = START_Y;
 
-        vec![
-            transform.translation.x / (GRID_SIZE * 0.5),
-            transform.translation.y / (GRID_SIZE * 0.5),
-        ]
+        vec![transform.translation.x / (GRID_SIZE * 0.5)]
     }
 }
