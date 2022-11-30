@@ -4,8 +4,8 @@
 use bevy::{
     app::ScheduleRunnerSettings,
     prelude::{
-        default, shape, App, Assets, Camera2dBundle, Color, Commands, Component, Mesh, PluginGroup,
-        Query, ResMut, Transform, Vec2, Vec3, With,
+        default, shape, App, Assets, Camera2dBundle, Color, Commands, Component, Mesh,
+        OrthographicProjection, PluginGroup, Query, ResMut, Transform, Vec2, Vec3, With,
     },
     sprite::{ColorMaterial, MaterialMesh2dBundle, Sprite, SpriteBundle},
     window::{PresentMode, WindowDescriptor, WindowPlugin},
@@ -70,7 +70,13 @@ fn setup_graphics(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
 ) {
-    commands.spawn(Camera2dBundle::default());
+    commands.spawn(Camera2dBundle {
+        projection: OrthographicProjection {
+            scale: 0.01,
+            ..default()
+        },
+        ..default()
+    });
 
     // Grid
     commands.spawn(SpriteBundle {
@@ -82,18 +88,10 @@ fn setup_graphics(
         ..default()
     });
 
-    // Center dot
-    commands.spawn(MaterialMesh2dBundle {
-        mesh: meshes.add(shape::Circle::new(10.0).into()).into(),
-        material: materials.add(ColorMaterial::from(Color::BLACK)),
-        transform: Transform::from_translation(Vec3::new(0.0, 0.0, 1.0)),
-        ..default()
-    });
-
     // Entity
     commands.spawn((
         MaterialMesh2dBundle {
-            mesh: meshes.add(shape::Circle::new(10.0).into()).into(),
+            mesh: meshes.add(shape::Circle::new(1.0).into()).into(),
             material: materials.add(ColorMaterial::from(Color::PURPLE)),
             transform: Transform::from_translation(Vec3::new(START_X, START_Y, 2.0)),
             ..default()
