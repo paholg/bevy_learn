@@ -1,14 +1,13 @@
 //! Vanilla policy gradient
 //! See https://arxiv.org/abs/1604.06778
 
-use std::{collections::VecDeque, fs::OpenOptions, io::Write};
+use std::{fs::OpenOptions, io::Write};
 
 use tch::{
     nn::{self, Module, OptimizerConfig},
     COptimizer, Device, Kind, Tensor,
 };
 use tch_distr::{Categorical, Distribution};
-use tracing::info;
 
 use crate::{Env, Obs, Trainer};
 
@@ -52,7 +51,6 @@ pub struct ReinforceTrainer<E: Env> {
     env: E,
     policy_net: PolicyNet,
     optimizer: COptimizer,
-    returns: VecDeque<f32>,
     rewards: Vec<f32>,
     actions: Vec<i64>,
     states: Vec<Obs>,
@@ -69,7 +67,6 @@ impl<E: Env> ReinforceTrainer<E> {
         let policy_net = PolicyNet::new(&env, 20);
         let optimizer = nn::Adam::default().build_copt(1e-4).unwrap();
         let gamma = 0.99;
-        let returns = VecDeque::with_capacity(100);
 
         let state = env.init();
 
@@ -77,7 +74,6 @@ impl<E: Env> ReinforceTrainer<E> {
             env,
             policy_net,
             optimizer,
-            returns,
             rewards: Vec::new(),
             actions: Vec::new(),
             states: Vec::new(),
@@ -92,7 +88,6 @@ impl<E: Env> ReinforceTrainer<E> {
 impl<E: Env> Trainer<E> for ReinforceTrainer<E> {
     fn train_one_step<'w, 's>(&mut self, mut param: E::Param<'w, 's>) {
         if self.n_episodes == 0 && self.n_steps == 0 {
-            println!("New data.csv file");
             let mut file = OpenOptions::new()
                 .write(true)
                 .create(true)
@@ -114,14 +109,7 @@ impl<E: Env> Trainer<E> for ReinforceTrainer<E> {
         self.rewards.push(step.reward);
         self.state = step.obs;
 
-        // info!(step.reward, ?probs_vec, ?self.state, action, "Step");
         if step.is_done {
-            // let reward: f32 = self
-            //     .rewards
-            //     .iter()
-            //     .enumerate()
-            //     .map(|(i, r)| self.gamma.powi(i as i32) * r)
-            //     .sum();
             let reward: f32 = self.rewards.iter().sum();
             let states = Tensor::of_slice2(&self.states);
             let actions = Tensor::of_slice(&self.actions);
@@ -129,17 +117,12 @@ impl<E: Env> Trainer<E> for ReinforceTrainer<E> {
 
             let sampler = Categorical::from_probs(probs);
             let log_probs = -sampler.log_prob(&actions);
-            println!("log_probs:");
-            log_probs.print();
             let pseudo_loss = (log_probs * reward as f64).sum(Kind::Float);
-            println!("pseudo_loss: {pseudo_loss}");
 
             self.optimizer.zero_grad().unwrap();
             pseudo_loss.backward();
             self.optimizer.step().unwrap();
 
-            let sum_rewards = self.rewards.iter().sum();
-            self.returns.push_back(sum_rewards);
             self.n_episodes += 1;
 
             self.rewards = Vec::new();
@@ -148,16 +131,12 @@ impl<E: Env> Trainer<E> for ReinforceTrainer<E> {
             self.state = self.env.reset(&mut param);
 
             println!(
-                "Episode: {}, Return: {sum_rewards:7.2}, steps: {}",
+                "Episode: {}, Return: {reward:7.2}, steps: {}",
                 self.n_episodes, self.n_steps
             );
-            if self.n_episodes % 100 == 0 {
-                let mut file = OpenOptions::new().append(true).open("data.csv").unwrap();
-                write!(&mut file, "{},{}\n", self.n_episodes, reward).unwrap();
-            }
+            let mut file = OpenOptions::new().append(true).open("data.csv").unwrap();
+            write!(&mut file, "{},{}\n", self.n_episodes, reward).unwrap();
             self.n_steps = 0;
-
-            // panic!();
         }
     }
 }

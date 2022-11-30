@@ -6,13 +6,16 @@ edition = "2021"
 [dependencies]
 bevy = "0.9"
 directories = "4"
+rand = "0.8"
 tch = "0.9"
 tch_distr = { git = "https://github.com/paholg/tch-distr-rs", branch = "update-tch-0.9.0" }
 thiserror = "1"
 tracing = "0.1"
+typed-builder = "0.11"
 
 [dev-dependencies]
 bevy_rapier2d = "0.19"
+clap = { version = "4", features = ["derive"] }
 
 # Enable a small amount of optimization in debug mode
 [profile.dev]

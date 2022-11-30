@@ -1,9 +1,6 @@
-use std::marker::PhantomData;
-
-use bevy::prelude::{NonSendMut, Plugin};
+use bevy::prelude::NonSendMut;
 use tch::nn;
 
-pub mod ppo;
 pub mod reinforce;
 
 /// The type used for the observation of the state of the world.
@@ -26,6 +23,8 @@ pub trait Env {
 
     // TODO: Allow observation_space to be more than one dimensional.
     const NUM_OBSERVATIONS: i64;
+
+    fn vs(&self) -> &nn::VarStore;
 
     fn path(&self) -> nn::Path;
 

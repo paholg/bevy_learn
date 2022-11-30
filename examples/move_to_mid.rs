@@ -4,81 +4,100 @@
 use bevy::{
     app::ScheduleRunnerSettings,
     prelude::{
-        default, shape, App, Assets, Camera2dBundle, Color, Commands, Component, Mesh, NonSendMut,
-        PluginGroup, Query, ResMut, System, Transform, Vec2, Vec3, With,
+        default, shape, App, Assets, Camera2dBundle, Color, Commands, Component, Mesh, PluginGroup,
+        Query, ResMut, Transform, Vec2, Vec3, With,
     },
     sprite::{ColorMaterial, MaterialMesh2dBundle, Sprite, SpriteBundle},
     window::{PresentMode, WindowDescriptor, WindowPlugin},
     DefaultPlugins, MinimalPlugins,
 };
-use bevy_learn::{reinforce::ReinforceTrainer, train_one_step, Env, Trainer};
+use bevy_learn::{reinforce::ReinforceTrainer, train_one_step, Env};
+use clap::Parser;
 use tch::nn;
-use tracing::info;
 
 const GRID_SIZE: f32 = 10.0;
 const START_X: f32 = 0.0;
 const START_Y: f32 = 0.0;
 
+#[derive(Parser)]
+struct Args {
+    #[arg(short, long)]
+    graphics: bool,
+}
+
 #[derive(Component)]
 struct Ai;
 
 fn main() {
+    let args = Args::parse();
     // Ai
     let env = MoveEnv::new();
     let trainer = ReinforceTrainer::new(env);
 
-    App::new()
-        .insert_resource(ScheduleRunnerSettings {
+    let mut app = App::new();
+
+    if args.graphics {
+        app.add_plugins(DefaultPlugins.set(WindowPlugin {
+            window: WindowDescriptor {
+                present_mode: PresentMode::AutoNoVsync,
+                ..default()
+            },
+            ..default()
+        }))
+        .add_startup_system(setup_graphics);
+    } else {
+        app.insert_resource(ScheduleRunnerSettings {
             run_mode: bevy::app::RunMode::Loop { wait: None },
         })
         .add_plugins(MinimalPlugins)
-        // .add_plugins(DefaultPlugins.set(WindowPlugin {
-        //     window: WindowDescriptor {
-        //         present_mode: PresentMode::AutoNoVsync,
-        //         ..default()
-        //     },
-        //     ..default()
-        // }))
-        .add_startup_system(setup)
-        .insert_non_send_resource(trainer)
+        .add_startup_system(setup);
+    }
+    app.insert_non_send_resource(trainer)
         .add_system(train_one_step::<ReinforceTrainer<MoveEnv>, MoveEnv>)
         .run();
 }
 
-fn setup(
+fn setup(mut commands: Commands) {
+    // Entity
+    commands.spawn((
+        Transform::from_translation(Vec3::new(START_X, START_Y, 2.0)),
+        Ai,
+    ));
+}
+
+fn setup_graphics(
     mut commands: Commands,
-    // mut meshes: ResMut<Assets<Mesh>>,
-    // mut materials: ResMut<Assets<ColorMaterial>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<ColorMaterial>>,
 ) {
-    // commands.spawn(Camera2dBundle::default());
+    commands.spawn(Camera2dBundle::default());
 
-    // // Grid
-    // commands.spawn(SpriteBundle {
-    //     sprite: Sprite {
-    //         color: Color::rgb(0.4, 0.4, 1.0),
-    //         custom_size: Some(Vec2::new(GRID_SIZE, GRID_SIZE)),
-    //         ..default()
-    //     },
-    //     ..default()
-    // });
+    // Grid
+    commands.spawn(SpriteBundle {
+        sprite: Sprite {
+            color: Color::rgb(0.4, 0.4, 1.0),
+            custom_size: Some(Vec2::new(GRID_SIZE, GRID_SIZE)),
+            ..default()
+        },
+        ..default()
+    });
 
-    // // Center dot
-    // commands.spawn(MaterialMesh2dBundle {
-    //     mesh: meshes.add(shape::Circle::new(10.0).into()).into(),
-    //     material: materials.add(ColorMaterial::from(Color::BLACK)),
-    //     transform: Transform::from_translation(Vec3::new(0.0, 0.0, 1.0)),
-    //     ..default()
-    // });
+    // Center dot
+    commands.spawn(MaterialMesh2dBundle {
+        mesh: meshes.add(shape::Circle::new(10.0).into()).into(),
+        material: materials.add(ColorMaterial::from(Color::BLACK)),
+        transform: Transform::from_translation(Vec3::new(0.0, 0.0, 1.0)),
+        ..default()
+    });
 
     // Entity
     commands.spawn((
-        // MaterialMesh2dBundle {
-        //     mesh: meshes.add(shape::Circle::new(10.0).into()).into(),
-        //     material: materials.add(ColorMaterial::from(Color::PURPLE)),
-        //     transform: Transform::from_translation(Vec3::new(START_X, START_Y, 2.0)),
-        //     ..default()
-        // },
-        Transform::from_translation(Vec3::new(START_X, START_Y, 2.0)),
+        MaterialMesh2dBundle {
+            mesh: meshes.add(shape::Circle::new(10.0).into()).into(),
+            material: materials.add(ColorMaterial::from(Color::PURPLE)),
+            transform: Transform::from_translation(Vec3::new(START_X, START_Y, 2.0)),
+            ..default()
+        },
         Ai,
     ));
 }
@@ -95,13 +114,7 @@ impl MoveEnv {
     }
 }
 
-const ACTIONS: [Vec2; 2] = [
-    // Vec2::new(0.0, 0.0),
-    Vec2::new(-1.0, 0.0),
-    Vec2::new(1.0, 0.0),
-    // Vec2::new(0.0, 1.0),
-    // Vec2::new(0.0, -1.0),
-];
+const ACTIONS: [Vec2; 2] = [Vec2::new(-1.0, 0.0), Vec2::new(1.0, 0.0)];
 
 impl Env for MoveEnv {
     type Param<'w, 's> = Query<'w, 's, &'static mut Transform, With<Ai>>;
@@ -109,6 +122,10 @@ impl Env for MoveEnv {
     const NUM_ACTIONS: i64 = ACTIONS.len() as i64;
 
     const NUM_OBSERVATIONS: i64 = 1;
+
+    fn vs(&self) -> &tch::nn::VarStore {
+        &self.vs
+    }
 
     fn path(&self) -> tch::nn::Path {
         self.vs.root()
@@ -123,7 +140,6 @@ impl Env for MoveEnv {
         let action = ACTIONS[action as usize];
         transform.translation += action.extend(0.0);
 
-        // let reward = transform.translation.x / GRID_SIZE / 0.5;
         let is_done = transform.translation.x.abs() > GRID_SIZE * 0.5;
         let reward = if transform.translation.x > GRID_SIZE * 0.5 {
             1.0
