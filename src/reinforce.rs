@@ -4,139 +4,167 @@
 use std::{fs::OpenOptions, io::Write};
 
 use tch::{
-    nn::{self, Module, OptimizerConfig},
-    COptimizer, Device, Kind, Tensor,
+    kind::FLOAT_CPU,
+    nn::{self, OptimizerConfig},
+    Device, Kind, Tensor,
 };
-use tch_distr::{Categorical, Distribution};
+use typed_builder::TypedBuilder;
 
-use crate::{Env, Obs, Trainer};
+use crate::{Env, Trainer};
 
 #[derive(Debug)]
-struct PolicyNet {
+struct Model {
     seq: nn::Sequential,
     device: Device,
 }
 
-impl PolicyNet {
+impl Model {
     pub fn new<E: Env>(env: &E, n_hidden: i64) -> Self {
+        let num_observations = E::OBSERVATION_SPACE.iter().product();
         let device = env.path().device();
         let hidden = nn::linear(
-            env.path() / "reinforce-lhidden",
-            E::NUM_OBSERVATIONS,
+            env.path() / "reinforce-linear-hidden",
+            num_observations,
             n_hidden,
             nn::LinearConfig::default(),
         );
         let out = nn::linear(
-            env.path() / "reinforce-lout",
+            env.path() / "reinforce-linear-out",
             n_hidden,
             E::NUM_ACTIONS,
             nn::LinearConfig::default(),
         );
-        let seq = nn::seq()
-            .add(hidden)
-            .add_fn(|xs| xs.relu())
-            .add(out)
-            .add_fn(|xs| xs.softmax(1, Kind::Float));
+        let seq = nn::seq().add(hidden).add_fn(|xs| xs.tanh()).add(out);
         Self { seq, device }
     }
 }
 
-impl nn::Module for PolicyNet {
+impl nn::Module for Model {
     fn forward(&self, xs: &Tensor) -> Tensor {
         xs.to_device(self.device).apply(&self.seq)
     }
 }
 
+#[derive(TypedBuilder, Debug)]
+pub struct ReinforceConfig {
+    /// The learning rate of the optimizer.
+    #[builder(default = 1e-4)]
+    learning_rate: f64,
+
+    /// The discount factor.
+    #[builder(default = 0.99)]
+    gamma: f64,
+
+    /// The number of neurons in the hidden layer.
+    #[builder(default = 32)]
+    n_hidden: i64,
+}
+
 pub struct ReinforceTrainer<E: Env> {
     env: E,
-    policy_net: PolicyNet,
-    optimizer: COptimizer,
+    model: Model,
+    optimizer: nn::Optimizer,
     rewards: Vec<f32>,
     actions: Vec<i64>,
-    states: Vec<Obs>,
-    state: Obs,
+    observations: Vec<Tensor>,
+    obs: Tensor,
 
-    gamma: f32,
+    config: ReinforceConfig,
 
-    n_episodes: usize,
-    n_steps: usize,
+    n_epochs: usize,
+    n_steps: i64,
 }
 
 impl<E: Env> ReinforceTrainer<E> {
-    pub fn new(env: E) -> Self {
-        let policy_net = PolicyNet::new(&env, 20);
-        let optimizer = nn::Adam::default().build_copt(1e-4).unwrap();
-        let gamma = 0.99;
-
-        let state = env.init();
+    pub fn new(config: ReinforceConfig, env: E) -> Self {
+        let model = Model::new(&env, config.n_hidden);
+        let optimizer = nn::Adam::default()
+            .build(env.vs(), config.learning_rate)
+            .unwrap();
+        let obs = env.init();
 
         Self {
             env,
-            policy_net,
+            model,
             optimizer,
             rewards: Vec::new(),
             actions: Vec::new(),
-            states: Vec::new(),
-            state,
-            gamma,
-            n_episodes: 0,
+            observations: Vec::new(),
+            obs,
+            config,
+            n_epochs: 0,
             n_steps: 0,
         }
     }
 }
 
+fn accumulate_rewards(mut rewards: Vec<f32>) -> Tensor {
+    let mut acc_reward = 0.0;
+    for reward in rewards.iter_mut().rev() {
+        acc_reward += *reward;
+        *reward = acc_reward;
+    }
+    Tensor::of_slice(&rewards)
+}
+
 impl<E: Env> Trainer<E> for ReinforceTrainer<E> {
     fn train_one_step<'w, 's>(&mut self, mut param: E::Param<'w, 's>) {
-        if self.n_episodes == 0 && self.n_steps == 0 {
+        if self.n_epochs == 0 && self.n_steps == 0 {
             let mut file = OpenOptions::new()
                 .write(true)
                 .create(true)
                 .truncate(true)
                 .open("data.csv")
                 .unwrap();
-            write!(&mut file, "episode,reward\n").unwrap();
+            write!(&mut file, "epoch,reward\n").unwrap();
         }
-        self.n_steps += 1;
-        // Calculate the probabilities of taking each action.
-        let state = Tensor::of_slice(&self.state).unsqueeze(0);
-        let probs = self.policy_net.forward(&state);
-        let sampler = Categorical::from_probs(probs);
-        let action = sampler.sample(&[]).into();
+
+        let action = tch::no_grad(|| {
+            self.obs
+                .unsqueeze(0)
+                .apply(&self.model)
+                .softmax(1, Kind::Float)
+                .multinomial(1, true)
+        })
+        .into();
 
         let step = self.env.step(action, &mut param);
-        self.states.push(self.state.clone());
-        self.actions.push(action);
         self.rewards.push(step.reward);
-        self.state = step.obs;
+        self.actions.push(action);
+        self.observations.push(self.obs.shallow_clone());
+        self.obs = step.obs;
+
+        self.n_steps += 1;
 
         if step.is_done {
-            let reward: f32 = self.rewards.iter().sum();
-            let states = Tensor::of_slice2(&self.states);
-            let actions = Tensor::of_slice(&self.actions);
-            let probs = self.policy_net.forward(&states);
+            let sum_reward: f32 = self.rewards.iter().sum();
+            let actions = Tensor::of_slice(&self.actions).unsqueeze(1);
+            let rewards = accumulate_rewards(self.rewards.drain(..).collect());
+            let action_mask =
+                Tensor::zeros(&[self.n_steps, 2], FLOAT_CPU).scatter_value(1, &actions, 1.0);
+            let logits = Tensor::stack(&self.observations, 0).apply(&self.model);
+            let log_probs = (action_mask * logits.log_softmax(1, Kind::Float)).sum_dim_intlist(
+                Some([1].as_ref()),
+                false,
+                Kind::Float,
+            );
+            let loss = -(rewards * log_probs).mean(Kind::Float);
+            self.optimizer.backward_step(&loss);
 
-            let sampler = Categorical::from_probs(probs);
-            let log_probs = -sampler.log_prob(&actions);
-            let pseudo_loss = (log_probs * reward as f64).sum(Kind::Float);
+            println!(
+                "Epoch: {}, Return: {sum_reward:7.2}, steps: {}",
+                self.n_epochs, self.n_steps
+            );
+            let mut file = OpenOptions::new().append(true).open("data.csv").unwrap();
+            write!(&mut file, "{},{}\n", self.n_epochs, sum_reward).unwrap();
 
-            self.optimizer.zero_grad().unwrap();
-            pseudo_loss.backward();
-            self.optimizer.step().unwrap();
-
-            self.n_episodes += 1;
+            self.n_epochs += 1;
+            self.n_steps = 0;
 
             self.rewards = Vec::new();
             self.actions = Vec::new();
-            self.states = Vec::new();
-            self.state = self.env.reset(&mut param);
-
-            println!(
-                "Episode: {}, Return: {reward:7.2}, steps: {}",
-                self.n_episodes, self.n_steps
-            );
-            let mut file = OpenOptions::new().append(true).open("data.csv").unwrap();
-            write!(&mut file, "{},{}\n", self.n_episodes, reward).unwrap();
-            self.n_steps = 0;
+            self.observations = Vec::new();
+            self.obs = self.env.reset(&mut param);
         }
     }
 }

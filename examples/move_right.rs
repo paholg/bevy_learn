@@ -11,11 +11,14 @@ use bevy::{
     window::{PresentMode, WindowDescriptor, WindowPlugin},
     DefaultPlugins, MinimalPlugins,
 };
-use bevy_learn::{reinforce::ReinforceTrainer, train_one_step, Env};
+use bevy_learn::{
+    reinforce::{ReinforceConfig, ReinforceTrainer},
+    train_one_step, Env,
+};
 use clap::Parser;
-use tch::nn;
+use tch::{nn, Tensor};
 
-const GRID_SIZE: f32 = 10.0;
+const GRID_SIZE: f32 = 50.0;
 const START_X: f32 = 0.0;
 const START_Y: f32 = 0.0;
 
@@ -32,7 +35,7 @@ fn main() {
     let args = Args::parse();
     // Ai
     let env = MoveEnv::new();
-    let trainer = ReinforceTrainer::new(env);
+    let trainer = ReinforceTrainer::new(ReinforceConfig::builder().build(), env);
 
     let mut app = App::new();
 
@@ -119,7 +122,7 @@ impl Env for MoveEnv {
 
     const NUM_ACTIONS: i64 = ACTIONS.len() as i64;
 
-    const NUM_OBSERVATIONS: i64 = 1;
+    const OBSERVATION_SPACE: &'static [i64] = &[1];
 
     fn vs(&self) -> &tch::nn::VarStore {
         &self.vs
@@ -129,8 +132,8 @@ impl Env for MoveEnv {
         self.vs.root()
     }
 
-    fn init(&self) -> bevy_learn::Obs {
-        vec![START_X]
+    fn init(&self) -> Tensor {
+        Tensor::of_slice(&[START_X])
     }
 
     fn step<'w, 's>(&mut self, action: i64, param: &mut Self::Param<'w, 's>) -> bevy_learn::Step {
@@ -148,17 +151,17 @@ impl Env for MoveEnv {
         };
 
         bevy_learn::Step {
-            obs: vec![transform.translation.x / (GRID_SIZE * 0.5)],
+            obs: Tensor::of_slice(&[transform.translation.x / (GRID_SIZE * 0.5)]),
             reward,
             is_done,
         }
     }
 
-    fn reset<'w, 's>(&mut self, param: &mut Self::Param<'w, 's>) -> bevy_learn::Obs {
+    fn reset<'w, 's>(&mut self, param: &mut Self::Param<'w, 's>) -> Tensor {
         let mut transform = param.single_mut();
         transform.translation.x = START_X;
         transform.translation.y = START_Y;
 
-        vec![transform.translation.x / (GRID_SIZE * 0.5)]
+        Tensor::of_slice(&[transform.translation.x / (GRID_SIZE * 0.5)])
     }
 }

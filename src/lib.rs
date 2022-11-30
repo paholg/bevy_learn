@@ -1,19 +1,25 @@
 use bevy::prelude::NonSendMut;
-use tch::nn;
+use tch::{nn, Tensor};
 
 pub mod reinforce;
 
-/// The type used for the observation of the state of the world.
-/// It is currently a 1-d vector, but will be a Tensor in the future.
-pub type Obs = Vec<f32>;
-
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Step {
     /// Observation: The state of the world as exposed to the AI.
-    pub obs: Obs,
+    pub obs: Tensor,
     /// Reward for the AI for this step. Can be negative to be a punishment.
     pub reward: f32,
     pub is_done: bool,
+}
+
+impl Step {
+    fn copy_with_obs(&self, obs: &Tensor) -> Self {
+        Self {
+            obs: obs.copy(),
+            reward: self.reward.clone(),
+            is_done: self.is_done.clone(),
+        }
+    }
 }
 
 pub trait Env {
@@ -21,18 +27,17 @@ pub trait Env {
 
     const NUM_ACTIONS: i64;
 
-    // TODO: Allow observation_space to be more than one dimensional.
-    const NUM_OBSERVATIONS: i64;
+    const OBSERVATION_SPACE: &'static [i64];
 
     fn vs(&self) -> &nn::VarStore;
 
     fn path(&self) -> nn::Path;
 
     /// Return the initial observation of the world state.
-    fn init(&self) -> Obs;
+    fn init(&self) -> Tensor;
 
     /// Reset the environment, returning the observation of the world state.
-    fn reset<'w, 's>(&mut self, param: &mut Self::Param<'w, 's>) -> Obs;
+    fn reset<'w, 's>(&mut self, param: &mut Self::Param<'w, 's>) -> Tensor;
 
     fn step<'w, 's>(&mut self, action: i64, param: &mut Self::Param<'w, 's>) -> Step;
 }
