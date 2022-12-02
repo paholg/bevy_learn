@@ -10,7 +10,7 @@ use tch::{
 };
 use typed_builder::TypedBuilder;
 
-use crate::{Env, Trainer};
+use crate::{Env, Step, Trainer};
 
 #[derive(Debug)]
 struct Model {
@@ -19,19 +19,19 @@ struct Model {
 }
 
 impl Model {
-    pub fn new<E: Env>(env: &E, n_hidden: i64) -> Self {
-        let num_observations = E::OBSERVATION_SPACE.iter().product();
-        let device = env.path().device();
+    pub fn new(env: &Env, n_hidden: i64) -> Self {
+        let num_observations = env.observation_space.iter().product();
+        let device = env.vs.root().device();
         let hidden = nn::linear(
-            env.path() / "reinforce-linear-hidden",
+            env.vs.root() / "reinforce-linear-hidden",
             num_observations,
             n_hidden,
             nn::LinearConfig::default(),
         );
         let out = nn::linear(
-            env.path() / "reinforce-linear-out",
+            env.vs.root() / "reinforce-linear-out",
             n_hidden,
-            E::NUM_ACTIONS,
+            env.num_actions,
             nn::LinearConfig::default(),
         );
         let seq = nn::seq().add(hidden).add_fn(|xs| xs.tanh()).add(out);
@@ -51,17 +51,13 @@ pub struct ReinforceConfig {
     #[builder(default = 1e-4)]
     learning_rate: f64,
 
-    /// The discount factor.
-    #[builder(default = 0.99)]
-    gamma: f64,
-
     /// The number of neurons in the hidden layer.
     #[builder(default = 32)]
     n_hidden: i64,
 }
 
-pub struct ReinforceTrainer<E: Env> {
-    env: E,
+pub struct ReinforceTrainer {
+    env: Env,
     model: Model,
     optimizer: nn::Optimizer,
     rewards: Vec<f32>,
@@ -69,19 +65,25 @@ pub struct ReinforceTrainer<E: Env> {
     observations: Vec<Tensor>,
     obs: Tensor,
 
-    config: ReinforceConfig,
-
     n_epochs: usize,
     n_steps: i64,
 }
 
-impl<E: Env> ReinforceTrainer<E> {
-    pub fn new(config: ReinforceConfig, env: E) -> Self {
+impl ReinforceTrainer {
+    pub fn new(config: ReinforceConfig, env: Env, initial_obs: Tensor) -> Self {
         let model = Model::new(&env, config.n_hidden);
         let optimizer = nn::Adam::default()
-            .build(env.vs(), config.learning_rate)
+            .build(&env.vs, config.learning_rate)
             .unwrap();
-        let obs = env.init();
+        let obs = initial_obs;
+
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open("data.csv")
+            .unwrap();
+        write!(&mut file, "epoch,reward\n").unwrap();
 
         Self {
             env,
@@ -91,7 +93,6 @@ impl<E: Env> ReinforceTrainer<E> {
             actions: Vec::new(),
             observations: Vec::new(),
             obs,
-            config,
             n_epochs: 0,
             n_steps: 0,
         }
@@ -107,18 +108,16 @@ fn accumulate_rewards(mut rewards: Vec<f32>) -> Tensor {
     Tensor::of_slice(&rewards)
 }
 
-impl<E: Env> Trainer<E> for ReinforceTrainer<E> {
-    fn train_one_step<'w, 's>(&mut self, mut param: E::Param<'w, 's>) {
-        if self.n_epochs == 0 && self.n_steps == 0 {
-            let mut file = OpenOptions::new()
-                .write(true)
-                .create(true)
-                .truncate(true)
-                .open("data.csv")
-                .unwrap();
-            write!(&mut file, "epoch,reward\n").unwrap();
-        }
+impl Trainer for ReinforceTrainer {
+    fn env(&self) -> &Env {
+        &self.env
+    }
 
+    fn env_mut(&mut self) -> &mut Env {
+        &mut self.env
+    }
+
+    fn pick_action(&mut self) -> i64 {
         let action = tch::no_grad(|| {
             self.obs
                 .unsqueeze(0)
@@ -128,15 +127,18 @@ impl<E: Env> Trainer<E> for ReinforceTrainer<E> {
         })
         .into();
 
-        let step = self.env.step(action, &mut param);
-        self.rewards.push(step.reward);
         self.actions.push(action);
+        action
+    }
+
+    fn train(&mut self, step: Step) {
+        self.rewards.push(step.reward);
         self.observations.push(self.obs.shallow_clone());
         self.obs = step.obs;
 
         self.n_steps += 1;
 
-        if step.is_done {
+        if let Some(initial_obs) = step.is_done {
             let sum_reward: f32 = self.rewards.iter().sum();
             let actions = Tensor::of_slice(&self.actions).unsqueeze(1);
             let rewards = accumulate_rewards(self.rewards.drain(..).collect());
@@ -164,7 +166,7 @@ impl<E: Env> Trainer<E> for ReinforceTrainer<E> {
             self.rewards = Vec::new();
             self.actions = Vec::new();
             self.observations = Vec::new();
-            self.obs = self.env.reset(&mut param);
+            self.obs = initial_obs;
         }
     }
 }

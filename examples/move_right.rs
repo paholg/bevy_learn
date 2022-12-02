@@ -4,7 +4,7 @@
 use bevy::{
     app::ScheduleRunnerSettings,
     prelude::{
-        default, shape, App, Assets, Camera2dBundle, Color, Commands, Component, Mesh,
+        default, shape, App, Assets, Camera2dBundle, Color, Commands, Component, Mesh, NonSendMut,
         OrthographicProjection, PluginGroup, Query, ResMut, Transform, Vec2, Vec3, With,
     },
     sprite::{ColorMaterial, MaterialMesh2dBundle, Sprite, SpriteBundle},
@@ -13,7 +13,7 @@ use bevy::{
 };
 use bevy_learn::{
     reinforce::{ReinforceConfig, ReinforceTrainer},
-    train_one_step, Env,
+    Env, Step, Trainer,
 };
 use clap::Parser;
 use tch::{nn, Tensor};
@@ -34,8 +34,13 @@ struct Ai;
 fn main() {
     let args = Args::parse();
     // Ai
-    let env = MoveEnv::new();
-    let trainer = ReinforceTrainer::new(ReinforceConfig::builder().build(), env);
+    let device = tch::Device::cuda_if_available();
+    let env = Env::new(ACTIONS.len() as i64, vec![1], device);
+    let trainer = ReinforceTrainer::new(
+        ReinforceConfig::builder().build(),
+        env,
+        Tensor::of_slice(&[START_X]),
+    );
 
     let mut app = App::new();
 
@@ -56,7 +61,7 @@ fn main() {
         .add_startup_system(setup);
     }
     app.insert_non_send_resource(trainer)
-        .add_system(train_one_step::<ReinforceTrainer<MoveEnv>, MoveEnv>)
+        .add_system(ai_act)
         .run();
 }
 
@@ -103,65 +108,34 @@ fn setup_graphics(
     ));
 }
 
-struct MoveEnv {
-    vs: nn::VarStore,
-}
-
-impl MoveEnv {
-    fn new() -> Self {
-        let device = tch::Device::cuda_if_available();
-        let vs = nn::VarStore::new(device);
-        Self { vs }
-    }
-}
-
 const ACTIONS: [Vec2; 2] = [Vec2::new(-1.0, 0.0), Vec2::new(1.0, 0.0)];
 
-impl Env for MoveEnv {
-    type Param<'w, 's> = Query<'w, 's, &'static mut Transform, With<Ai>>;
+fn ai_act(mut trainer: NonSendMut<ReinforceTrainer>, mut ai: Query<&mut Transform, With<Ai>>) {
+    let action_id = trainer.pick_action();
+    let action = ACTIONS[action_id as usize];
+    let mut transform = ai.get_single_mut().unwrap();
+    transform.translation += action.extend(0.0);
 
-    const NUM_ACTIONS: i64 = ACTIONS.len() as i64;
+    let reward = if transform.translation.x > GRID_SIZE * 0.5 {
+        1.0
+    } else if transform.translation.x < -GRID_SIZE * 0.5 {
+        -1.0
+    } else {
+        0.0
+    };
 
-    const OBSERVATION_SPACE: &'static [i64] = &[1];
-
-    fn vs(&self) -> &tch::nn::VarStore {
-        &self.vs
-    }
-
-    fn path(&self) -> tch::nn::Path {
-        self.vs.root()
-    }
-
-    fn init(&self) -> Tensor {
-        Tensor::of_slice(&[START_X])
-    }
-
-    fn step<'w, 's>(&mut self, action: i64, param: &mut Self::Param<'w, 's>) -> bevy_learn::Step {
-        let mut transform = param.single_mut();
-        let action = ACTIONS[action as usize];
-        transform.translation += action.extend(0.0);
-
-        let is_done = transform.translation.x.abs() > GRID_SIZE * 0.5;
-        let reward = if transform.translation.x > GRID_SIZE * 0.5 {
-            1.0
-        } else if transform.translation.x < -GRID_SIZE * 0.5 {
-            -1.0
-        } else {
-            0.0
-        };
-
-        bevy_learn::Step {
-            obs: Tensor::of_slice(&[transform.translation.x / (GRID_SIZE * 0.5)]),
-            reward,
-            is_done,
-        }
-    }
-
-    fn reset<'w, 's>(&mut self, param: &mut Self::Param<'w, 's>) -> Tensor {
-        let mut transform = param.single_mut();
+    let is_done = if transform.translation.x.abs() > GRID_SIZE * 0.5 {
         transform.translation.x = START_X;
-        transform.translation.y = START_Y;
+        Some(Tensor::of_slice(&[transform.translation.x]))
+    } else {
+        None
+    };
 
-        Tensor::of_slice(&[transform.translation.x / (GRID_SIZE * 0.5)])
-    }
+    let step = Step {
+        obs: Tensor::of_slice(&[transform.translation.x / (GRID_SIZE * 0.5)]),
+        reward,
+        is_done,
+    };
+
+    trainer.train(step);
 }
