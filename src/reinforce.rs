@@ -142,8 +142,8 @@ impl Trainer for ReinforceTrainer {
             let sum_reward: f32 = self.rewards.iter().sum();
             let actions = Tensor::of_slice(&self.actions).unsqueeze(1);
             let rewards = accumulate_rewards(self.rewards.drain(..).collect());
-            let action_mask =
-                Tensor::zeros(&[self.n_steps, 2], FLOAT_CPU).scatter_value(1, &actions, 1.0);
+            let action_mask = Tensor::zeros(&[self.n_steps, self.env.num_actions], FLOAT_CPU)
+                .scatter_value(1, &actions, 1.0);
             let logits = Tensor::stack(&self.observations, 0).apply(&self.model);
             let log_probs = (action_mask * logits.log_softmax(1, Kind::Float)).sum_dim_intlist(
                 Some([1].as_ref()),

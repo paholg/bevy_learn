@@ -40,9 +40,6 @@ impl Env {
 }
 
 pub trait Trainer {
-    fn env(&self) -> &Env;
-    fn env_mut(&mut self) -> &mut Env;
-
     fn pick_action(&mut self) -> i64;
     fn train(&mut self, step: Step);
 }
