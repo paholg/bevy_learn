@@ -7,6 +7,7 @@ use bevy::{
         default, shape, App, Assets, Camera2dBundle, Color, Commands, Component, Mesh, NonSendMut,
         OrthographicProjection, PluginGroup, Query, ResMut, Transform, Vec2, Vec3, With,
     },
+    render::camera::ScalingMode,
     sprite::{ColorMaterial, MaterialMesh2dBundle, Sprite, SpriteBundle},
     window::{PresentMode, WindowDescriptor, WindowPlugin},
     DefaultPlugins, MinimalPlugins,
@@ -16,11 +17,16 @@ use bevy_learn::{
     Env, Step, Trainer,
 };
 use clap::Parser;
-use tch::{nn, Tensor};
+use rand::Rng;
+use tch::Tensor;
 
 const GRID_SIZE: f32 = 50.0;
-const START_X: f32 = 0.0;
-const START_Y: f32 = 0.0;
+const MAX: f32 = GRID_SIZE * 0.5;
+
+const INNER_CIRCLE: f32 = 10.0;
+
+const START_X: f32 = -20.0;
+const START_Y: f32 = -20.0;
 
 #[derive(Parser)]
 struct Args {
@@ -35,11 +41,11 @@ fn main() {
     let args = Args::parse();
     // Ai
     let device = tch::Device::cuda_if_available();
-    let env = Env::new(ACTIONS.len() as i64, vec![1], device);
+    let env = Env::new(ACTIONS.len() as i64, vec![2], device);
     let trainer = ReinforceTrainer::new(
         ReinforceConfig::builder().build(),
         env,
-        Tensor::of_slice(&[START_X]),
+        Tensor::of_slice(&[START_X, START_Y]),
     );
 
     let mut app = App::new();
@@ -80,7 +86,10 @@ fn setup_graphics(
 ) {
     commands.spawn(Camera2dBundle {
         projection: OrthographicProjection {
-            scale: 0.01,
+            scaling_mode: ScalingMode::Auto {
+                min_width: GRID_SIZE,
+                min_height: GRID_SIZE,
+            },
             ..default()
         },
         ..default()
@@ -96,6 +105,14 @@ fn setup_graphics(
         ..default()
     });
 
+    // Inner circle
+    commands.spawn(MaterialMesh2dBundle {
+        mesh: meshes.add(shape::Circle::new(INNER_CIRCLE).into()).into(),
+        material: materials.add(ColorMaterial::from(Color::GREEN)),
+        transform: Transform::from_translation(Vec3::new(0.0, 0.0, 1.0)),
+        ..default()
+    });
+
     // Entity
     commands.spawn((
         MaterialMesh2dBundle {
@@ -108,7 +125,13 @@ fn setup_graphics(
     ));
 }
 
-const ACTIONS: [Vec2; 2] = [Vec2::new(-1.0, 0.0), Vec2::new(1.0, 0.0)];
+const ACTIONS: [Vec2; 5] = [
+    Vec2::new(0.0, 0.0),
+    Vec2::new(-1.0, 0.0),
+    Vec2::new(1.0, 0.0),
+    Vec2::new(0.0, -1.0),
+    Vec2::new(0.0, 1.0),
+];
 
 fn ai_act(mut trainer: NonSendMut<ReinforceTrainer>, mut ai: Query<&mut Transform, With<Ai>>) {
     let action_id = trainer.pick_action();
@@ -116,23 +139,31 @@ fn ai_act(mut trainer: NonSendMut<ReinforceTrainer>, mut ai: Query<&mut Transfor
     let mut transform = ai.get_single_mut().unwrap();
     transform.translation += action.extend(0.0);
 
-    let reward = if transform.translation.x > GRID_SIZE * 0.5 {
-        1.0
-    } else if transform.translation.x < -GRID_SIZE * 0.5 {
+    let reward = if transform.translation.x.abs() > MAX || transform.translation.y.abs() > MAX {
         -1.0
+    } else if transform.translation.x * transform.translation.x
+        + transform.translation.y * transform.translation.y
+        < INNER_CIRCLE * INNER_CIRCLE
+    {
+        1.0
     } else {
         0.0
     };
 
-    let is_done = if transform.translation.x.abs() > GRID_SIZE * 0.5 {
-        transform.translation.x = START_X;
-        Some(Tensor::of_slice(&[transform.translation.x]))
+    let is_done = if reward != 0.0 {
+        let mut rng = rand::thread_rng();
+        transform.translation.x = rng.gen::<f32>() * GRID_SIZE - MAX;
+        transform.translation.y = rng.gen::<f32>() * GRID_SIZE - MAX;
+        Some(Tensor::of_slice(&[
+            transform.translation.x / MAX,
+            transform.translation.y / MAX,
+        ]))
     } else {
         None
     };
 
     let step = Step {
-        obs: Tensor::of_slice(&[transform.translation.x / (GRID_SIZE * 0.5)]),
+        obs: Tensor::of_slice(&[transform.translation.x / MAX, transform.translation.y / MAX]),
         reward,
         is_done,
     };

@@ -15,6 +15,7 @@ typed-builder = "0.11"
 [dev-dependencies]
 bevy_rapier2d = "0.19"
 clap = { version = "4", features = ["derive"] }
+rand = "0.8"
 
 # Enable a small amount of optimization in debug mode
 [profile.dev]
@@ -28,4 +29,4 @@ opt-level = 3
 name = "cartpole"
 
 [[example]]
-name = "move_right"
+name = "move_to_mid"

@@ -1,4 +1,4 @@
-use tch::{nn, Device, Tensor};
+use tch::{kind::FLOAT_CPU, nn, Device, Tensor};
 
 pub mod reinforce;
 
@@ -36,9 +36,45 @@ impl Env {
             vs: nn::VarStore::new(device),
         }
     }
+
+    pub fn path(&self) -> nn::Path {
+        self.vs.root()
+    }
 }
 
 pub trait Trainer {
     fn pick_action(&mut self) -> i64;
     fn train(&mut self, step: Step);
+}
+
+#[derive(Debug)]
+pub(crate) struct FrameStack {
+    data: Tensor,
+    nprocs: i64,
+    nstack: i64,
+}
+
+impl FrameStack {
+    pub fn new(nprocs: i64, nstack: i64, obs_space: &[i64]) -> FrameStack {
+        if obs_space.len() != 2 {
+            panic!("Currently only 2d observation spaces are supported for this trainer");
+        }
+        FrameStack {
+            data: Tensor::zeros(&[nprocs, nstack, obs_space[0], obs_space[1]], FLOAT_CPU),
+            nprocs,
+            nstack,
+        }
+    }
+
+    pub fn update<'a>(&'a mut self, img: &Tensor, masks: Option<&Tensor>) -> &'a Tensor {
+        if let Some(masks) = masks {
+            self.data *= masks.view([self.nprocs, 1, 1, 1])
+        };
+        let slice = |i| self.data.narrow(1, i, 1);
+        for i in 1..self.nstack {
+            slice(i - 1).copy_(&slice(i))
+        }
+        slice(self.nstack - 1).copy_(img);
+        &self.data
+    }
 }
