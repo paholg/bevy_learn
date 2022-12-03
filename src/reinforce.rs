@@ -6,25 +6,18 @@ use std::{fs::OpenOptions, io::Write};
 use tch::{
     kind::FLOAT_CPU,
     nn::{self, OptimizerConfig},
-    Device, Kind, Tensor,
+    Kind, Tensor,
 };
 use typed_builder::TypedBuilder;
 
-use crate::{Env, Step, Trainer};
-
-#[derive(Debug)]
-struct Model {
-    seq: nn::Sequential,
-    device: Device,
-}
+use crate::{Env, Model, Trainer};
 
 impl Model {
-    pub fn new(env: &Env, n_hidden: i64) -> Self {
-        let num_observations = env.observation_space.iter().product();
+    pub fn new_linear(env: &Env, n_hidden: i64) -> Self {
         let device = env.vs.root().device();
         let hidden = nn::linear(
             env.vs.root() / "reinforce-linear-hidden",
-            num_observations,
+            env.num_observations,
             n_hidden,
             nn::LinearConfig::default(),
         );
@@ -36,12 +29,6 @@ impl Model {
         );
         let seq = nn::seq().add(hidden).add_fn(|xs| xs.tanh()).add(out);
         Self { seq, device }
-    }
-}
-
-impl nn::Module for Model {
-    fn forward(&self, xs: &Tensor) -> Tensor {
-        xs.to_device(self.device).apply(&self.seq)
     }
 }
 
@@ -65,17 +52,17 @@ pub struct ReinforceTrainer {
     observations: Vec<Tensor>,
     obs: Tensor,
 
-    n_epochs: usize,
+    n_episodes: usize,
     n_steps: i64,
 }
 
 impl ReinforceTrainer {
-    pub fn new(config: ReinforceConfig, env: Env, initial_obs: Tensor) -> Self {
-        let model = Model::new(&env, config.n_hidden);
+    pub fn new(config: ReinforceConfig, env: Env, initial_obs: &[f32]) -> Self {
+        let model = Model::new_linear(&env, config.n_hidden);
         let optimizer = nn::Adam::default()
             .build(&env.vs, config.learning_rate)
             .unwrap();
-        let obs = initial_obs;
+        let obs = Tensor::of_slice(initial_obs);
 
         let mut file = OpenOptions::new()
             .write(true)
@@ -83,7 +70,7 @@ impl ReinforceTrainer {
             .truncate(true)
             .open("data.csv")
             .unwrap();
-        write!(&mut file, "epoch,reward,steps\n").unwrap();
+        write!(&mut file, "episode,reward,steps\n").unwrap();
 
         Self {
             env,
@@ -93,7 +80,7 @@ impl ReinforceTrainer {
             actions: Vec::new(),
             observations: Vec::new(),
             obs,
-            n_epochs: 0,
+            n_episodes: 0,
             n_steps: 0,
         }
     }
@@ -123,14 +110,16 @@ impl Trainer for ReinforceTrainer {
         action
     }
 
-    fn train(&mut self, step: Step) {
-        self.rewards.push(step.reward);
+    fn train(&mut self, obs: &[f32], reward: f32) {
+        self.rewards.push(reward);
         self.observations.push(self.obs.shallow_clone());
-        self.obs = step.obs;
+        self.obs = Tensor::of_slice(obs);
 
         self.n_steps += 1;
+    }
 
-        if let Some(initial_obs) = step.is_done {
+    fn reset(&mut self, obs: &[f32]) {
+        if self.n_steps > 0 {
             let sum_reward: f32 = self.rewards.iter().sum();
             let actions = Tensor::of_slice(&self.actions).unsqueeze(1);
             let rewards = accumulate_rewards(self.rewards.drain(..).collect());
@@ -146,24 +135,24 @@ impl Trainer for ReinforceTrainer {
             self.optimizer.backward_step(&loss);
 
             println!(
-                "Epoch: {}, Return: {sum_reward:7.2}, steps: {}",
-                self.n_epochs, self.n_steps
+                "Episode: {}, Return: {sum_reward:7.2}, steps: {}",
+                self.n_episodes, self.n_steps
             );
             let mut file = OpenOptions::new().append(true).open("data.csv").unwrap();
             write!(
                 &mut file,
                 "{},{},{}\n",
-                self.n_epochs, sum_reward, self.n_steps
+                self.n_episodes, sum_reward, self.n_steps
             )
             .unwrap();
 
-            self.n_epochs += 1;
+            self.n_episodes += 1;
             self.n_steps = 0;
 
             self.rewards = Vec::new();
             self.actions = Vec::new();
             self.observations = Vec::new();
-            self.obs = initial_obs;
         }
+        self.obs = Tensor::of_slice(obs);
     }
 }

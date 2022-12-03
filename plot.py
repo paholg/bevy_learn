@@ -1,9 +1,15 @@
 #!/usr/bin/env python3
 
+import sys
 import matplotlib.pyplot as plt
 import pandas as pd
 
-data = pd.read_csv('data.csv')
+if (len(sys.argv) > 1):
+    fname = sys.argv[1]
+else:
+    fname = 'data.csv'
+
+data = pd.read_csv(fname)
 
 fig, ax = plt.subplots()
 
