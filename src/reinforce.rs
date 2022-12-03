@@ -83,7 +83,7 @@ impl ReinforceTrainer {
             .truncate(true)
             .open("data.csv")
             .unwrap();
-        write!(&mut file, "epoch,reward\n").unwrap();
+        write!(&mut file, "epoch,reward,steps\n").unwrap();
 
         Self {
             env,
@@ -109,14 +109,6 @@ fn accumulate_rewards(mut rewards: Vec<f32>) -> Tensor {
 }
 
 impl Trainer for ReinforceTrainer {
-    fn env(&self) -> &Env {
-        &self.env
-    }
-
-    fn env_mut(&mut self) -> &mut Env {
-        &mut self.env
-    }
-
     fn pick_action(&mut self) -> i64 {
         let action = tch::no_grad(|| {
             self.obs
@@ -158,7 +150,12 @@ impl Trainer for ReinforceTrainer {
                 self.n_epochs, self.n_steps
             );
             let mut file = OpenOptions::new().append(true).open("data.csv").unwrap();
-            write!(&mut file, "{},{}\n", self.n_epochs, sum_reward).unwrap();
+            write!(
+                &mut file,
+                "{},{},{}\n",
+                self.n_epochs, sum_reward, self.n_steps
+            )
+            .unwrap();
 
             self.n_epochs += 1;
             self.n_steps = 0;
