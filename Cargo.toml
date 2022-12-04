@@ -4,27 +4,16 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-bevy = "0.9"
-directories = "4"
 rand = "0.8"
 tch = "0.9"
 tch_distr = { git = "https://github.com/spebern/tch-distr-rs" }
-thiserror = "1"
-tracing = "0.1"
 typed-builder = "0.11"
 
 [dev-dependencies]
+bevy = "0.9"
 bevy_rapier2d = "0.19"
 clap = { version = "4", features = ["derive"] }
 rand = "0.8"
-
-# Enable a small amount of optimization in debug mode
-[profile.dev]
-opt-level = 1
-
-# Enable high optimizations for dependencies (incl. Bevy), but not for our code:
-[profile.dev.package."*"]
-opt-level = 3
 
 [[example]]
 name = "cartpole"
