@@ -10,7 +10,7 @@ use typed_builder::TypedBuilder;
 
 use crate::{ActorCriticModel, Env, Trainer};
 
-fn layer_init(mut layer: nn::Linear, std: f64) -> nn::Linear {
+fn layer_init(layer: nn::Linear, _std: f64) -> nn::Linear {
     // TODO: fixme
     // nn::Init::Orthogonal { gain: std }.set(&mut layer.ws);
     // nn::Init::Const(0.0).set(layer.bs.as_mut().unwrap());

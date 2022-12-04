@@ -12,11 +12,11 @@ use bevy::{
     window::{PresentMode, WindowDescriptor, WindowPlugin},
     DefaultPlugins, MinimalPlugins,
 };
-use bevy_learn::{
+use clap::Parser;
+use learnit::{
     ppo::{PpoConfig, PpoTrainer},
     Env, Trainer,
 };
-use clap::Parser;
 use rand::Rng;
 
 const GRID_SIZE: f32 = 50.0;
