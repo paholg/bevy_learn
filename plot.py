@@ -10,9 +10,10 @@ else:
     fname = 'data.csv'
 
 data = pd.read_csv(fname)
+data['cumulative reward'] = data['reward'].cumsum()
 
 fig, ax = plt.subplots()
 
-data.plot(ax=ax, x=0, y=1)
-data.plot(ax=ax, x=0, y=2, secondary_y=True)
+data.plot(ax=ax, x='episode', y='cumulative reward')
+data.plot(ax=ax, x='episode', y='steps', secondary_y=True)
 plt.show()

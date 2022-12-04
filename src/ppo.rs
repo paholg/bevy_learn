@@ -173,7 +173,7 @@ impl PpoTrainer {
             .truncate(true)
             .open("data.csv")
             .unwrap();
-        write!(&mut file, "epoch,reward,steps\n").unwrap();
+        write!(&mut file, "episode,reward,steps\n").unwrap();
 
         Self {
             env,
