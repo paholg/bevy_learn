@@ -13,10 +13,8 @@ use bevy::{
     DefaultPlugins, MinimalPlugins,
 };
 use bevy_learn::{
-    // ppo::{PpoConfig, PpoTrainer},
-    reinforce::{ReinforceConfig, ReinforceTrainer},
-    Env,
-    Trainer,
+    ppo::{PpoConfig, PpoTrainer},
+    Env, Trainer,
 };
 use clap::Parser;
 use rand::Rng;
@@ -43,8 +41,7 @@ fn main() {
     // Ai
     let device = tch::Device::cuda_if_available();
     let env = Env::new(ACTIONS.len() as i64, 2, device);
-    let trainer =
-        ReinforceTrainer::new(ReinforceConfig::builder().build(), env, &[START_X, START_Y]);
+    let trainer = PpoTrainer::new(PpoConfig::builder().build(), env, &[START_X, START_Y]);
 
     let mut app = App::new();
 
@@ -132,7 +129,7 @@ const ACTIONS: [Vec2; 5] = [
     Vec2::new(0.0, 1.0),
 ];
 
-fn ai_act(mut trainer: NonSendMut<ReinforceTrainer>, mut ai: Query<&mut Transform, With<Ai>>) {
+fn ai_act(mut trainer: NonSendMut<PpoTrainer>, mut ai: Query<&mut Transform, With<Ai>>) {
     let action_id = trainer.pick_action();
     let action = ACTIONS[action_id as usize];
     let mut transform = ai.get_single_mut().unwrap();
@@ -152,7 +149,7 @@ fn ai_act(mut trainer: NonSendMut<ReinforceTrainer>, mut ai: Query<&mut Transfor
     trainer.train(&transform.translation.truncate().to_array(), reward);
 }
 
-fn ai_reset(mut trainer: NonSendMut<ReinforceTrainer>, mut ai: Query<&mut Transform, With<Ai>>) {
+fn ai_reset(mut trainer: NonSendMut<PpoTrainer>, mut ai: Query<&mut Transform, With<Ai>>) {
     let mut transform = ai.get_single_mut().unwrap();
     if transform.translation.x.abs() > MAX
         || transform.translation.y.abs() > MAX

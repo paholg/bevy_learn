@@ -1,6 +1,6 @@
 use tch::{nn, Device, Tensor};
 
-// pub mod ppo;
+pub mod ppo;
 pub mod reinforce;
 
 pub struct Env {
@@ -53,4 +53,19 @@ pub struct ActorCriticModel {
     critic: nn::Linear,
     actor: nn::Linear,
     device: Device,
+}
+
+impl ActorCriticModel {
+    pub fn forward(&self, xs: &Tensor) -> ActorCritic {
+        let xs = xs.to_device(self.device).apply(&self.seq);
+        ActorCritic {
+            critic: xs.apply(&self.critic),
+            actor: xs.apply(&self.actor),
+        }
+    }
+}
+
+pub struct ActorCritic {
+    pub actor: Tensor,
+    pub critic: Tensor,
 }
