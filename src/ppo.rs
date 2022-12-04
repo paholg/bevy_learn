@@ -10,7 +10,7 @@ use typed_builder::TypedBuilder;
 
 use crate::{ActorCriticModel, Env, Trainer};
 
-fn layer_init(layer: nn::Linear, _std: f64) -> nn::Linear {
+fn layer_init(mut layer: nn::Linear, std: f64) -> nn::Linear {
     // TODO: fixme
     // nn::Init::Orthogonal { gain: std }.set(&mut layer.ws);
     // nn::Init::Const(0.0).set(layer.bs.as_mut().unwrap());
@@ -56,10 +56,6 @@ pub struct PpoConfig {
 
     #[builder(default = 128)]
     n_steps: i64,
-
-    // TODO: Handle anneal_lr
-    #[builder(default = false)]
-    anneal_lr: bool,
 
     #[builder(default = 0.99)]
     gamma: f64,
