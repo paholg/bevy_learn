@@ -1,5 +1,5 @@
 [package]
-name = "bevy_learn"
+name = "learnit"
 version = "0.1.0"
 edition = "2021"
 
@@ -30,4 +30,4 @@ opt-level = 3
 name = "cartpole"
 
 [[example]]
-name = "move_to_mid"
+name = "move_to_target"
