@@ -9,11 +9,13 @@ if (len(sys.argv) > 1):
 else:
     fname = 'data.csv'
 
-data = pd.read_csv(fname)
-data['cumulative reward'] = data['reward'].cumsum()
-
 fig, ax = plt.subplots()
 
-data.plot(ax=ax, x='episode', y='cumulative reward')
-data.plot(ax=ax, x='episode', y='steps', secondary_y=True)
+data = pd.read_csv(fname)
+
+# data['cumulative reward'] = data['reward'].cumsum()
+# data.plot(ax=ax, x='episode', y='cumulative reward')
+
+data.plot(ax=ax, x='episode', y='reward', style='.')
+data.plot(ax=ax, x='episode', y='steps', secondary_y=True, style='.')
 plt.show()

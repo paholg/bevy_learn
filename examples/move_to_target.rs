@@ -5,7 +5,7 @@ use bevy::{
     app::ScheduleRunnerSettings,
     prelude::{
         default, shape, App, Assets, Camera2dBundle, Color, Commands, Component, Mesh, NonSendMut,
-        OrthographicProjection, PluginGroup, Query, ResMut, Transform, Vec2, Vec3, With, Without,
+        OrthographicProjection, PluginGroup, Query, ResMut, Transform, Vec2, With, Without,
     },
     render::camera::ScalingMode,
     sprite::{ColorMaterial, MaterialMesh2dBundle, Sprite, SpriteBundle},
@@ -24,8 +24,8 @@ const MAX: f32 = GRID_SIZE * 0.5;
 
 const TARGET_SIZE: f32 = 1.0;
 
-const START_X: f32 = -20.0;
-const START_Y: f32 = -20.0;
+const START: Transform = Transform::from_xyz(-20.0, -20.0, 2.0);
+const TARGET_START: Transform = Transform::from_xyz(0.0, 0.0, 1.0);
 
 #[derive(Parser)]
 struct Args {
@@ -43,12 +43,9 @@ fn main() {
     let args = Args::parse();
     // Ai
     let device = tch::Device::cuda_if_available();
-    let env = Env::new(ACTIONS.len() as i64, 4, device);
-    let trainer = PpoTrainer::new(
-        PpoConfig::builder().build(),
-        env,
-        &[START_X / MAX, START_Y / MAX, 0.0, 0.0],
-    );
+    let obs = obs(&START, &TARGET_START);
+    let env = Env::new(ACTIONS.len() as i64, obs.len() as i64, device);
+    let trainer = PpoTrainer::new(PpoConfig::builder().build(), env, &obs);
 
     let mut app = App::new();
 
@@ -76,16 +73,10 @@ fn main() {
 
 fn setup(mut commands: Commands) {
     // Entity
-    commands.spawn((
-        Transform::from_translation(Vec3::new(START_X, START_Y, 2.0)),
-        Ai,
-    ));
+    commands.spawn((START, Ai));
 
     // Target
-    commands.spawn((
-        Transform::from_translation(Vec3::new(0.0, 0.0, 1.0)),
-        Target,
-    ));
+    commands.spawn((TARGET_START, Target));
 }
 
 fn setup_graphics(
@@ -119,7 +110,7 @@ fn setup_graphics(
         MaterialMesh2dBundle {
             mesh: meshes.add(shape::Circle::new(TARGET_SIZE).into()).into(),
             material: materials.add(ColorMaterial::from(Color::GREEN)),
-            transform: Transform::from_translation(Vec3::new(0.0, 0.0, 1.0)),
+            transform: TARGET_START,
             ..default()
         },
         Target,
@@ -130,7 +121,7 @@ fn setup_graphics(
         MaterialMesh2dBundle {
             mesh: meshes.add(shape::Circle::new(1.0).into()).into(),
             material: materials.add(ColorMaterial::from(Color::PURPLE)),
-            transform: Transform::from_translation(Vec3::new(START_X, START_Y, 2.0)),
+            transform: START,
             ..default()
         },
         Ai,
@@ -155,6 +146,27 @@ fn hit(ai: &Transform, target: &Transform) -> bool {
     n2 < TARGET_SIZE * TARGET_SIZE
 }
 
+fn obs(ai: &Transform, target: &Transform) -> [f32; 6] {
+    [
+        ai.translation.x - target.translation.x,
+        ai.translation.y - target.translation.y,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        // MAX - ai.translation.x,
+        // ai.translation.x + MAX,
+        // MAX - ai.translation.y,
+        // ai.translation.y + MAX,
+        // (MAX - ai.translation.x).recip(),
+        // (ai.translation.x + MAX).recip(),
+        // (MAX - ai.translation.y).recip(),
+        // (ai.translation.y + MAX).recip(),
+        // (ai.translation.x - target.translation.x).recip(),
+        // (ai.translation.y - target.translation.y).recip(),
+    ]
+}
+
 fn ai_act(
     mut trainer: NonSendMut<PpoTrainer>,
     mut ai: Query<&mut Transform, With<Ai>>,
@@ -167,21 +179,15 @@ fn ai_act(
     transform.translation += action.extend(0.0);
 
     let reward = if out_of_bounds(&transform) {
-        -1.0
+        -0.1
     } else if hit(&transform, &target) {
         1.0
     } else {
-        0.0
+        -0.001
     };
 
-    let obs = &[
-        transform.translation.x / MAX,
-        transform.translation.y / MAX,
-        target.translation.x / MAX,
-        target.translation.y / MAX,
-    ];
-
-    trainer.train(obs, reward);
+    let obs = obs(&transform, target);
+    trainer.train(&obs, reward);
 }
 
 fn ai_reset(
@@ -198,13 +204,8 @@ fn ai_reset(
         target.translation.x = rng.gen::<f32>() * GRID_SIZE - MAX;
         target.translation.y = rng.gen::<f32>() * GRID_SIZE - MAX;
 
-        let obs = &[
-            transform.translation.x / MAX,
-            transform.translation.y / MAX,
-            target.translation.x / MAX,
-            target.translation.y / MAX,
-        ];
+        let obs = obs(&transform, &target);
 
-        trainer.reset(obs);
+        trainer.reset(&obs);
     }
 }
